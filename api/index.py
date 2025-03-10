@@ -7,9 +7,9 @@ from datetime import datetime
 
 app = Flask(__name__)
 
-# Create directories if they don't exist
-PHOTO_DIR = "captured_photos"
-INFO_DIR = "client_info"
+# Create directories in /tmp (Vercel's writable directory)
+PHOTO_DIR = "/tmp/captured_photos"
+INFO_DIR = "/tmp/client_info"
 os.makedirs(PHOTO_DIR, exist_ok=True)
 os.makedirs(INFO_DIR, exist_ok=True)
 
