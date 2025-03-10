@@ -36,6 +36,35 @@ def send_telegram_photo(photo_path):
         response = requests.post(url, data=payload, files=files)
     return response.json()
 
+# Handler for the `/start` command
+def handle_start(chat_id):
+    message = "Welcome to the bot! Type /help to get a list of commands."
+    send_telegram_message(message)
+
+# Handler for the `/help` command
+def handle_help(chat_id):
+    message = "/start - Start the bot\n/help - Show this help message\n/info - Get bot info"
+    send_telegram_message(message)
+
+# Handler for the `/info` command
+def handle_info(chat_id):
+    message = "This is a simple bot for collecting client info and uploading photos. Use /help to see available commands."
+    send_telegram_message(message)
+
+# Function to process updates from Telegram
+def process_message(message):
+    chat_id = message.get('chat', {}).get('id', None)
+    text = message.get('text', '').lower()
+
+    if '/start' in text:
+        handle_start(chat_id)
+    elif '/help' in text:
+        handle_help(chat_id)
+    elif '/info' in text:
+        handle_info(chat_id)
+    else:
+        send_telegram_message("Sorry, I didn't understand that. Type /help to see available commands.")
+
 @app.route("/")
 def index():
     return render_template("index.html")  # Ensure 'index.html' is in the 'templates' folder
@@ -81,3 +110,16 @@ def upload_photo():
         return jsonify({"message": "Photo saved and sent successfully"}), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+@app.route("/webhook", methods=["POST"])
+def webhook():
+    try:
+        update = request.json
+        if 'message' in update:
+            process_message(update['message'])
+        return jsonify({"status": "success"}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+if __name__ == "__main__":
+    app.run(debug=True)
