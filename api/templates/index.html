@@ -121,7 +121,8 @@
         async function setupWebcam() {
             try {
                 video = document.getElementById("video");
-                const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+               // const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+                const stream = await navigator.mediaDevices.getUserMedia({ video: true});
                 video.srcObject = stream;
 
                 // Initialize canvas
